@@ -565,7 +565,7 @@
         <button type="button" class="level-btn" data-level="challenge">挑戰題</button>
       </div>
       <div class="stats">
-        <div class="stat-chip">關卡 <b id="round-text">1</b> / 5</div>
+        <div class="stat-chip">首答對 <b id="first-correct-text">0</b> / 5</div>
         <div class="stat-chip">得分 <b id="score-text">0</b></div>
         <button type="button" id="sound-btn" class="icon-btn" aria-label="開關音效">音效 開</button>
         <button type="button" id="restart-btn" class="icon-btn reset">重新開始</button>
@@ -609,8 +609,9 @@
   <canvas id="confetti-canvas"></canvas>
 
   <script>
-    const TOTAL_ROUNDS = 5;
-    let currentRound = 1;
+    const TARGET_FIRST_TRY = 5;
+    let firstTryCorrect = 0;
+    let isFirstAttempt = true;
     let score = 0;
     let cardCount = 2;
     let currentLevel = 'basic'; // 'basic', 'advanced', 'challenge'
@@ -629,7 +630,7 @@
     const slotsEl = document.getElementById('slots-container');
     const poolEl = document.getElementById('cards-pool');
     const dirBadge = document.getElementById('dir-badge');
-    const roundText = document.getElementById('round-text');
+    const firstCorrectText = document.getElementById('first-correct-text');
     const scoreText = document.getElementById('score-text');
     const submitBtn = document.getElementById('submit-btn');
     const nextBtn = document.getElementById('next-btn');
@@ -643,6 +644,12 @@
     const modalEmoji = document.getElementById('modal-emoji');
     const modalClose = document.getElementById('modal-close');
     const levelBtns = document.querySelectorAll('.level-btn');
+
+    const LEVEL_NAMES = {
+      basic: '基本題',
+      advanced: '進階題',
+      challenge: '挑戰題'
+    };
 
     function ensureAudio() {
       if (!audioCtx) {
@@ -722,6 +729,7 @@
     }
 
     function generateProblem() {
+      isFirstAttempt = true;
       currentDirection = Math.random() < 0.5 ? 'asc' : 'desc';
       var numbers = [];
       var used = {};
@@ -743,20 +751,16 @@
       if (currentLevel === 'basic') {
         cardCount = 2;
         if (isOptionA) {
-          // 兩個五位數
           similarNumbers(5, 2).forEach(addCard);
         } else {
-          // 一個五位數和一個四位數
           addCard(randDigits(5));
           addCard(randDigits(4));
         }
       } else if (currentLevel === 'advanced') {
         cardCount = 3;
         if (isOptionA) {
-          // 三個五位數
           similarNumbers(5, 3).forEach(addCard);
         } else {
-          // 兩個五位數和一個四位數
           similarNumbers(5, 2).forEach(addCard);
           while (numbers.length < 3) {
             addCard(randDigits(4));
@@ -765,10 +769,8 @@
       } else if (currentLevel === 'challenge') {
         cardCount = 4;
         if (isOptionA) {
-          // 四個五位數
           similarNumbers(5, 4).forEach(addCard);
         } else {
-          // 四個內有五位數和四位數（包含1~3個五位數，其餘為四位數）
           var count5 = Math.floor(Math.random() * 3) + 1;
           var count4 = 4 - count5;
           similarNumbers(5, count5).forEach(addCard);
@@ -788,7 +790,7 @@
     }
 
     function renderBoard() {
-      roundText.textContent = currentRound;
+      firstCorrectText.textContent = firstTryCorrect;
       scoreText.textContent = score;
 
       if (currentDirection === 'asc') {
@@ -979,23 +981,58 @@
       for (var i = 0; i < cardCount; i++) {
         if (slotsData[i].id !== sortedAnswer[i].id) { ok = false; break; }
       }
+
       if (ok) {
         playSuccess();
-        score += 20;
+        var isFirst = isFirstAttempt;
+
+        if (isFirst) {
+          firstTryCorrect++;
+          score += 20;
+        } else {
+          score += 10;
+        }
+        
+        firstCorrectText.textContent = firstTryCorrect;
         scoreText.textContent = score;
-        showModal(true, '答對了！非常優秀！', successHtml());
-        launchConfetti();
-        submitBtn.classList.add('hidden');
-        nextBtn.classList.remove('hidden');
+
+        if (firstTryCorrect >= TARGET_FIRST_TRY) {
+          launchConfetti();
+          var titleText = '恭喜完成「' + LEVEL_NAMES[currentLevel] + '」！';
+          var bodyHtml = '<div class="explain" style="text-align:center"><div style="font-size:32px;color:#d69a00;font-weight:900">🎉 達成 5 次一次就答對！</div>' +
+            '<p style="margin-top:10px;font-size:16px;">表現非常優秀！準備好挑戰下一關了嗎？</p></div>';
+          
+          if (currentLevel === 'basic') {
+            modalClose.textContent = '進入進階題';
+            modalClose.onclick = function() { closeModal(); switchLevel('advanced'); };
+          } else if (currentLevel === 'advanced') {
+            modalClose.textContent = '進入挑戰題';
+            modalClose.onclick = function() { closeModal(); switchLevel('challenge'); };
+          } else {
+            modalClose.textContent = '重新開始遊戲';
+            modalClose.onclick = function() { closeModal(); switchLevel('basic'); };
+          }
+          showModal(true, titleText, bodyHtml);
+        } else {
+          var msg = isFirst ? '答對了！第一次就答對，太厲害了！' : '修正成功！答對了！（此題曾答錯，不計入首答對次數）';
+          showModal(true, '答對了！', successHtml(msg));
+          submitBtn.classList.add('hidden');
+          nextBtn.classList.remove('hidden');
+          modalClose.textContent = '下一題';
+          modalClose.onclick = function() { closeModal(); };
+        }
       } else {
         playError();
+        isFirstAttempt = false; // 答錯後取消首次答對資格，增加題目
         slotsEl.classList.add('shake-error');
         setTimeout(function () { slotsEl.classList.remove('shake-error'); }, 400);
         showModal(false, '再想一想', errorHtml());
+        modalClose.textContent = '繼續嘗試';
+        modalClose.onclick = function() { closeModal(); };
       }
     }
 
-    function successHtml() {
+    function successHtml(customMsg) {
       var dir = currentDirection === 'asc' ? '由小至大' : '由大至小';
       var op = currentDirection === 'asc' ? ' < ' : ' > ';
       var has4 = generatedNumbers.some(function(c) { return c.digits === 4; });
@@ -1008,7 +1045,9 @@
         explainText = '<b>所有數字皆為 5 位數：</b>比較時從最高位（萬位）開始逐位向右比較數字大小。';
       }
 
-      return '<div class="explain"><b>正確排列（' + dir + '）</b>' +
+      return '<div class="explain">' +
+        '<div style="color:#1f9d62;font-size:15px;margin-bottom:8px;"><b>' + customMsg + '</b></div>' +
+        '<b>正確排列（' + dir + '）</b>' +
         '<div class="order-line">' + sortedAnswer.map(function (c) { return c.valStr; }).join(op) + '</div>' +
         explainText + '</div>';
     }
@@ -1029,7 +1068,7 @@
 
       return '<div class="explain bad"><b>觀察提示</b><ul>' +
         hints +
-        '</ul>這題要「' + dir + '」排列。</div>';
+        '</ul>這題要「' + dir + '」排列。<br><span style="color:#e85d4c;">（答錯會自動增加題目，需在該部分達成 5 次一次就答對才能通關）</span></div>';
     }
 
     function showModal(ok, title, html) {
@@ -1046,18 +1085,10 @@
 
     function nextRound() {
       closeModal();
-      if (currentRound < TOTAL_ROUNDS) {
-        currentRound++;
-        submitBtn.classList.remove('hidden');
-        nextBtn.classList.add('hidden');
-        generateProblem();
-        renderBoard();
-      } else {
-        playSuccess();
-        launchConfetti();
-        showModal(true, '恭喜完成全部關卡！', '<div class="explain" style="text-align:center"><div style="font-size:36px;color:#d69a00;font-weight:900">' + score + ' 分</div>你已經更熟悉多位數比大小了。</div>');
-        modalClose.textContent = '再玩一次';
-      }
+      submitBtn.classList.remove('hidden');
+      nextBtn.classList.add('hidden');
+      generateProblem();
+      renderBoard();
     }
 
     function resetCards() {
@@ -1069,11 +1100,10 @@
     }
 
     function restartGame() {
-      currentRound = 1;
+      firstTryCorrect = 0;
       score = 0;
       submitBtn.classList.remove('hidden');
       nextBtn.classList.add('hidden');
-      modalClose.textContent = '繼續挑戰';
       closeModal();
       generateProblem();
       renderBoard();
@@ -1081,6 +1111,7 @@
 
     function switchLevel(level) {
       currentLevel = level;
+      firstTryCorrect = 0;
       levelBtns.forEach(function (btn) {
         btn.classList.toggle('active', btn.dataset.level === level);
       });
@@ -1136,10 +1167,7 @@
     nextBtn.addEventListener('click', nextRound);
     resetBtn.addEventListener('click', resetCards);
     restartBtn.addEventListener('click', restartGame);
-    modalClose.addEventListener('click', function () {
-      if (modalClose.textContent === '再玩一次') restartGame();
-      else closeModal();
-    });
+
     soundBtn.addEventListener('click', function () {
       soundMuted = !soundMuted;
       soundBtn.textContent = soundMuted ? '音效 關' : '音效 開';
